@@ -11,4 +11,4 @@ To sum up, I will undertake the following steps:
 3. Training prediction model by applying different methods and comparing their accuracy
 4. Prediction of the testing data set
 
-For a more detailed report refer to https://github.com/olenka123/coursera-practical-machine-learning-final-project/blob/master/report.md
+For a more detailed report refer to https://github.com/olenka123/PracticalMachineLearning/blob/gh-pages/index.rmd
