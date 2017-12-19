@@ -1,7 +1,7 @@
 ---
 title: "Practical Machine Learning Final Project"
 author: "Olga Ivanova"
-date: "December 19, 2017"
+date: "December 18, 2017"
 output: html_document
 ---
 
@@ -9,22 +9,184 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Background
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Based on a data set generously provided by HAR (available at http://groupware.les.inf.puc-rio.br/har) I will try to predict the manner in which users of fitness trackers (i.e.,Jawbone Up, Nike FuelBand, Fitbit etc.) work out and, particularly, how well they do it. This is the "classe" variable in the training set. I will explore the importance as well as the impact of other variables in the training set on the outcome variable by training a prediction model. I will afterwards apply my model to the 20 test cases in the testing data set.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+The training data for this project is available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The testing data for this project is available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
 
-```{r cars}
-summary(cars)
+To sum up, I will undertake the following steps:
+1. Loading data 
+2. Preprocessing data for future prediction
+3. Training prediction model by applying different methods and comparing their accuracy
+4. Prediction of the testing data set
+
+## Step 1. Loading data
+For building a training model I will be using the following R packages:
+
+``` {r}
+library(caret) #v6.0-78
+library(rpart) #v4.1-11
+library(e1071) #v1.6-8
+library(RCurl) #v1.95-4.8
+library(corrplot) #v.084
+library(randomForest) #v.6-12
+library(rpart.plot) #v2.1.2
+```
+First I will load the training and testing data sets:
+```{r}
+set.seed(2314)
+data.training <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"))
+data.testing <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"))
+```
+Alternatively I can first download data to the current working directory using RCurl package:
+``` {r eval=F}
+setwd("D:/Coursera/PracticalMachineLearning/Project/FinalProject")
+URL.training <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+URL.testing <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+file.training <- "./data/pml-training.csv"
+file.testing <- "./data/pml-testing.csv"
+
+download.file(URL.training, destfile = file.training, method = "libcurl")
+download.file(URL.testing, destfile = file.testing, method = "libcurl")
+data.training <- read.csv(file.training)
+data.testing <- read.csv(file.testing)
 ```
 
-## Including Plots
+```{r eval=TRUE}
+data.training <- data.training[,-1]
+data.testing <- data.testing[,-1]
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+dim(data.training) 
+dim(data.testing) 
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r echo=FALSE}
+plot(data.training$classe, main = "Histogram of the variable $classe in the training set", 
+     col="lightblue", xlab="$classe", ylab="frequency")
+```
+The plot above shows that Level A is the most frequent one. D appears to be the least frequent one.
+
+## Step 2. Preprocessing Data
+First, I will  remove variables with a near zero variance and eliminate observations with missing values:
+```{r}
+nzv <- nearZeroVar(data.training, saveMetrics = T)
+head(nzv,10)
+data.training <- data.training[,!nzv$nzv]
+data.testing <- data.testing[,!nzv$nzv]
+
+na <- which(colSums(is.na(data.training)) == F)
+data.training <- data.training[,na]
+data.testing <- data.testing[,na]
+
+data.training <- data.training[complete.cases(data.training),]
+data.testing <- data.testing[complete.cases(data.testing),]
+```
+Additionaly, I will remove variables in the data set that do not contribute much to the prediction of the outcome variable (i.e., time-related predictors etc.)
+
+```{r}
+removeVars <- grepl("timestamp|user_name|window", names(data.training))
+which(removeVars==T)
+data.training <- data.training[,!removeVars]
+data.testing <- data.testing[,!removeVars]
+```
+Preprocessing and removing missing values results in a data set with 52 predictors and 1 outcome variable. Next, let us check the correlation between the predictors and figure out whether reducing the number of and/or combining predictors is necessary.
+
+```{r}
+classe_idx <- which(names(data.training) == "classe")
+correl <- cor(data.training[, -classe_idx])
+highCorrel <- subset(data.frame(as.table(correl)),abs(Freq)>0.6)
+head(highCorrel,10)
+```
+
+``` {r echo=F}
+corrplot(correl,  method = "circle", order = "AOE", tl.cex=0.70, tl.col ="black")
+```
+
+Indeed, our analysis demonstrates that some predictors are highly correlated with each other. So it might be a good idea to transform the data into principal components (i.e., build combinations of predictors that are uncorrelated and at the same time capture the most variance).
+
+``` {r}
+preProc <- preProcess(data.training[, -classe_idx], method=c("pca"), thresh=0.99)
+data.training.pca <- predict(preProc, data.training[,-classe_idx])
+preProc
+```
+The transformation keeps 36 principal components that capture 99% of variance.
+
+## Step 3. Training prediction model
+First, I split the preprocessed data into a training (70%) and validation data sets which will be used later for cross-validation checks.
+`Note`: For the sake of better interpretation and due to only marginal model accuracy improvement, I will use the full number of variables for prediction.
+
+``` {r}
+set.seed(2314)
+inTrain <- createDataPartition(data.training$classe, p=0.7, list=F)
+training <- data.training[inTrain, ]
+validation <- data.training[-inTrain,]
+dim(training) 
+dim(validation)
+```
+I will now predict the outcome variable `classe` (i.e., the manner of exercise) with all the other variables in the testing data set using a decision tree, random forests and support vector machine model. I use the function `trainControl` to specify the type of resampling for cross-validation. By default, simple bootstrap resampling is used (10-fold CV).
+
+### Decision Trees
+
+```{r}
+set.seed(2433)
+fitControl <- trainControl(method = "cv", number = 5)
+modelFitDT <- train(classe~., method="rpart", trControl=fitControl, tuneLength = 10, data=training) 
+predictDT <- predict(modelFitDT, validation)
+table(predictDT, validation$classe)
+confusionMatrix(predictDT, validation$classe)$overall[1] 
+1 - as.numeric(confusionMatrix(validation$classe, predictDT)$overall[1]) 
+# Alternatively 
+modFitDT <- rpart(classe ~ ., data=training, method="class")
+prp(modFitDT)
+```
+
+The estimated accuracy of the Decision Tree Model is 71,33% and the estimated out-of-sample error is 28,67%. Let us check if we can achieve a better prediction by fitting a Random Forests model.
+
+### Random Forests
+I will use 200 trees, because I've noticed that the error rate doesn't decline a lot after 200 trees, not necessarily resulting in a higher model accuracy.
+
+```{r}
+fitControl <- trainControl(method = "cv", number = 5)
+modelFitRF <- train(classe~., method="rf", trControl=fitControl, ntree=200, data=training)
+modelFitRF
+predictRF <- predict(modelFitRF, validation)
+table(predictRF, validation$classe)
+confusionMatrix(predictRF, validation$classe)$overall[1] 
+1 - as.numeric(confusionMatrix(validation$classe, predictRF)$overall[1]) 
+
+# Alternatively
+modFitRF <- randomForest(classe ~ ., data=training, method="class", ntree=200)
+predictRF <- predict(modFitRF, validation, type = "class")
+
+varImpPlot(modFitRF, n.var=10,pch = 21, gpch = 21, bg = par("bg"), color = par("fg"), gcolor = par("fg"), lcolor = "red")
+```
+
+The estimated accuracy of the Random Forest Model is 99.34% and the estimated out-of-sample error is 0.007%. Random Forests demonstrate a much better performance than the Decision Tree model. The plot above demonstrates a mean decrease in a node impurity (Gini Index) showing the most important variables contributing to predicting te outcome variable.
+
+### Support Vector Machines
+
+The model accuracy doesn't substantially improve when fitting a Support Vector Machine.The accuracy of 94% is better than Decision Tree but not Random Forests. Additionaly I fitted a GBM model (Gradient Boosting Machine). The accuracy of 96% is better than that of a Support Vector machine but not Random Forests.
+```{r}
+modelFitSVM <- svm(classe~., data=training, method="class")
+predictSVM <- predict(modelFitSVM,validation, type="class")
+table(predictSVM,validation$classe)
+confusionMatrix(predictSVM,validation$classe)$overall[1]  
+1 - as.numeric(confusionMatrix(validation$classe, predictSVM)$overall[1])
+```
+
+## Step 4. Prediction of the testing data set
+Finaly, I apply the Random Forest model to the original testing data set downloaded from the data source. First remove the problem_id column.
+
+```{r}
+predict(modelFitRF, data.testing[, -length(names(data.testing))])
+```
+
+
+
+
+
+
+
