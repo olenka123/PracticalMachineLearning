@@ -67,6 +67,8 @@ dim(data.testing)
 plot(data.training$classe, main = "Histogram of the variable $classe in the training set", 
      col="lightblue", xlab="$classe", ylab="frequency")
 ```
+![](https://github.com/olenka123/PracticalMachineLearning/blob/gh-pages/Rhist.png)
+
 The plot above shows that Level A is the most frequent one. D appears to be the least frequent one.
 
 ## Step 2. Preprocessing Data
@@ -104,6 +106,7 @@ head(highCorrel,10)
 ``` {r echo=F}
 corrplot(correl,  method = "circle", order = "AOE", tl.cex=0.70, tl.col ="black")
 ```
+![](https://github.com/olenka123/PracticalMachineLearning/blob/gh-pages/CorrMatrix.png)
 
 Indeed, our analysis demonstrates that some predictors are highly correlated with each other. So it might be a good idea to transform the data into principal components (i.e., build combinations of predictors that are uncorrelated and at the same time capture the most variance).
 
@@ -163,6 +166,7 @@ predictRF <- predict(modFitRF, validation, type = "class")
 
 varImpPlot(modFitRF, n.var=10,pch = 21, gpch = 21, bg = par("bg"), color = par("fg"), gcolor = par("fg"), lcolor = "red")
 ```
+![](https://github.com/olenka123/PracticalMachineLearning/blob/gh-pages/VarImport.png)
 
 The estimated accuracy of the Random Forest Model is 99.34% and the estimated out-of-sample error is 0.007%. Random Forests demonstrate a much better performance than the Decision Tree model. The plot above demonstrates a mean decrease in a node impurity (Gini Index) showing the most important variables contributing to predicting te outcome variable.
 
